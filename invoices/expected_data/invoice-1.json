@@ -1,0 +1,40 @@
+{
+  "invoice_number": "12/10/1/15",
+  "invoice_date": "2012-10-01",
+  "sale_date": "2012-10-01",
+  "supplier": {
+    "name": "Radgost Sp. z o.o.",
+    "tax_id": "5252445767",
+    "address": {
+      "street": "Olesińska 21",
+      "city": "Warszawa",
+      "postal_code": "02-548",
+      "email": "platnosc@radgost.com"
+    }
+  },
+  "receiver": {
+    "name": "Radgost Sp. z o.o.",
+    "tax_id": "1234567890",
+    "address": {
+      "street": "Olesińska 21",
+      "city": "Warszawa",
+      "postal_code": "02-548"
+    }
+  },
+  "lines": [
+    {
+      "order_number": "1",
+      "description": "Fakturownia Standard",
+      "quantity": 1,
+      "net_price": "99,00",
+      "tax_rate": "23,00",
+      "tax_amount": "22,77",
+      "gross_price": "121,77"
+    }
+  ],
+  "totals": {
+    "net_amount": "99,00",
+    "tax_amount": "22,77",
+    "gross_amount": "121,77"
+  }
+}
