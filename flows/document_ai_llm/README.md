@@ -5,6 +5,10 @@ The first step is to get the text keeping the layout format. The second step is 
 
 ## Setup
 
+- Google Cloud account with active Document AI API
+- OpenAI account with access to GPT-4 or GPT-3.5
+- Python 3.12
+
 ## Run Locally
 
 ## Tasks
