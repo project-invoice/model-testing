@@ -1,0 +1,33 @@
+{
+  "invoice_number": "FV 152011",
+  "issue_date": "2011-04-14",
+  "due_date": "2011-04-21",
+  "seller_name": "M-złomen",
+  "seller_address": "Stoińskiego 19, 45-757 Opole",
+  "seller_tax_id": "542-896-25-23",
+  "buyer_name": "PUHP „AMBIT\" Sp.z o. o.",
+  "buyer_address": "Jaracza 1, 15-186 Białystok",
+  "buyer_tax_id": "542-020-68-40",
+  "total_amount": "6 120,00",
+  "net_amount": "5 200,00",
+  "tax_amount": "920,00",
+  "currency": "PLN",
+  "line_items": [
+    {
+      "description": "Złom stalowy",
+      "quantity": "1,500",
+      "unit_price": "800,00",
+      "total_price": "1 200,00",
+      "tax_rate": null
+    },
+    {
+      "description": "Zużyte akumulatory",
+      "quantity": "0,500",
+      "unit_price": "8 000,00",
+      "total_price": "4 920,00",
+      "tax_rate": "23%"
+    }
+  ],
+  "payment_terms": "przelew 7 dni",
+  "payment_method": "przelew"
+}

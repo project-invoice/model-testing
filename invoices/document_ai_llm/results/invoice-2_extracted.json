@@ -188,6 +188,39 @@
   ],
   "tables": [],
   "layout_preserved_text": "\n==================================================\nDOCUMENT LAYOUT\n==================================================\n\nSprzedawca:\n\nPRZYKŁAD FAKTURY VAT DOTYCZĄCEJ SPRZEDAŻY ZŁOMU\n\nM-złomen\n\nStoińskiego 19\n\n45-757 Opole\n\nNIP: 542-896-25-23\n\nFaktura VAT nr FV 152011 (oryginał)\n\nData wystawienia: 2011-04-14\n\nData sprzedaży: 2011-04-14\n\nMiejsce wystawienia:\n\nNabywca:\n\nPUHP „AMBIT\" Sp.z o. o.\n\nJaracza 1\n\n15-186 Białystok\n\nNIP: 542-020-68-40\n\nROW 1: lp | Nazwa towaru lub usługi | PKWiU | Jm | Ilość | Cena netto | Stawka VAT | Wart. netto | Wart. VAT | Wart. Brutto\nROW 2: 1 | Złom stalowy | Mg | 1,500 | 800,00 | _ * | 1 200,00 | * | 1 200,00\nROW 3: 2 | Zużyte akumulatory | Mg | 0,500 | 8 000,00 | 23% | 4 000,00 | 920,00 | 4 920,00\n\n-* odwrotne obciążenie\n\nForma zapłaty: przelew 7 dni\n\nTermin zapłaty 2011-04-21\n\nBank:\n\nNr konta:\n\nROW 1: w tym | Wart. Netto | Wart. VAT | Wart. Brutto\nROW 2: * | 1 200,00 | * | 1200,00\nROW 3: 23% | 4 000,00 | 920,00 | 4 920,00\nROW 4: RAZEM | 5 200,00 | 920,00 | 6 120,00\n\nRazem: 6 120,00\n\nZaliczka otrzymana: 0,00\n\nDo zapłaty: 6 120,00\n\nSłownie: sześć tysięcy, sto dwadzieścia złotych 00/100\n",
-  "source_file": "/Users/dj/Projects/model-testing/invoices/data/invoice-2.pdf",
-  "processor_id": "14e9217d88542adb"
+  "source_file": "invoices/data/invoice-2.pdf",
+  "processor_id": "14e9217d88542adb",
+  "structured_data": {
+    "invoice_number": "FV 152011",
+    "issue_date": "2011-04-14",
+    "due_date": "2011-04-21",
+    "seller_name": "M-złomen",
+    "seller_address": "Stoińskiego 19, 45-757 Opole",
+    "seller_tax_id": "542-896-25-23",
+    "buyer_name": "PUHP „AMBIT\" Sp.z o. o.",
+    "buyer_address": "Jaracza 1, 15-186 Białystok",
+    "buyer_tax_id": "542-020-68-40",
+    "total_amount": "6 120,00",
+    "net_amount": "5 200,00",
+    "tax_amount": "920,00",
+    "currency": "PLN",
+    "line_items": [
+      {
+        "description": "Złom stalowy",
+        "quantity": "1,500",
+        "unit_price": "800,00",
+        "total_price": "1 200,00",
+        "tax_rate": null
+      },
+      {
+        "description": "Zużyte akumulatory",
+        "quantity": "0,500",
+        "unit_price": "8 000,00",
+        "total_price": "4 920,00",
+        "tax_rate": "23%"
+      }
+    ],
+    "payment_terms": "przelew 7 dni",
+    "payment_method": "przelew"
+  }
 }

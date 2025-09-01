@@ -15,6 +15,7 @@ import argparse
 
 from google.cloud import documentai_v1 as documentai
 from google.api_core.client_options import ClientOptions
+from openai import OpenAI
 
 
 @dataclass
@@ -26,6 +27,140 @@ class DocumentBlock:
     page_number: int
     block_type: str  # paragraph, table, list, etc.
     bounding_box: Optional[Dict] = None
+
+
+@dataclass
+class InvoiceData:
+    """Structured invoice data extracted by LLM"""
+    
+    invoice_number: Optional[str] = None
+    issue_date: Optional[str] = None
+    due_date: Optional[str] = None
+    seller_name: Optional[str] = None
+    seller_address: Optional[str] = None
+    seller_tax_id: Optional[str] = None
+    buyer_name: Optional[str] = None
+    buyer_address: Optional[str] = None
+    buyer_tax_id: Optional[str] = None
+    total_amount: Optional[str] = None
+    net_amount: Optional[str] = None
+    tax_amount: Optional[str] = None
+    currency: Optional[str] = None
+    line_items: Optional[List[Dict]] = None
+    payment_terms: Optional[str] = None
+    payment_method: Optional[str] = None
+
+
+class InvoiceAnalyzer:
+    """OpenAI-powered invoice data extraction"""
+    
+    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o-mini"):
+        """
+        Initialize the invoice analyzer
+        
+        Args:
+            api_key: OpenAI API key (will use OPENAI_API_KEY env var if not provided)
+            model: OpenAI model to use for analysis
+        """
+        self.client = OpenAI(api_key=api_key)
+        self.model = model
+    
+    def extract_invoice_data(self, layout_text: str) -> InvoiceData:
+        """
+        Extract structured invoice data from layout-preserved text using OpenAI
+        
+        Args:
+            layout_text: The layout-preserved text from document AI
+            
+        Returns:
+            InvoiceData object with extracted information
+        """
+        prompt = self._create_extraction_prompt(layout_text)
+        
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are an expert at extracting structured data from invoices. Always respond with valid JSON format."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                temperature=0.1,  # Low temperature for consistent extraction
+                max_tokens=2000,
+                response_format={"type": "json_object"}
+            )
+            
+            result = json.loads(response.choices[0].message.content)
+            return self._parse_extracted_data(result)
+            
+        except Exception as e:
+            print(f"Error extracting invoice data with OpenAI: {e}")
+            return InvoiceData()
+    
+    def _create_extraction_prompt(self, layout_text: str) -> str:
+        """Create the prompt for invoice data extraction"""
+        return f"""
+Extract the most important information from this invoice text and return it as JSON.
+
+Invoice text:
+{layout_text}
+
+Please extract and return ONLY a JSON object with the following fields (use null for missing information):
+{{
+    "invoice_number": "invoice/bill number",
+    "issue_date": "date when invoice was issued (YYYY-MM-DD format if possible)",
+    "due_date": "payment due date (YYYY-MM-DD format if possible)",
+    "seller_name": "company/person issuing the invoice",
+    "seller_address": "seller's full address",
+    "seller_tax_id": "seller's tax ID/VAT number",
+    "buyer_name": "company/person receiving the invoice", 
+    "buyer_address": "buyer's full address",
+    "buyer_tax_id": "buyer's tax ID/VAT number",
+    "total_amount": "total amount to pay",
+    "net_amount": "net amount before tax",
+    "tax_amount": "tax amount",
+    "currency": "currency code or symbol",
+    "line_items": [
+        {{
+            "description": "item description",
+            "quantity": "quantity",
+            "unit_price": "price per unit",
+            "total_price": "total price for this item",
+            "tax_rate": "tax rate for this item"
+        }}
+    ],
+    "payment_terms": "payment terms/conditions",
+    "payment_method": "preferred payment method"
+}}
+
+Focus on accuracy and extract only information that is clearly present in the text.
+"""
+    
+    def _parse_extracted_data(self, result: Dict) -> InvoiceData:
+        """Parse the extracted JSON into InvoiceData object"""
+        return InvoiceData(
+            invoice_number=result.get("invoice_number"),
+            issue_date=result.get("issue_date"),
+            due_date=result.get("due_date"),
+            seller_name=result.get("seller_name"),
+            seller_address=result.get("seller_address"),
+            seller_tax_id=result.get("seller_tax_id"),
+            buyer_name=result.get("buyer_name"),
+            buyer_address=result.get("buyer_address"),
+            buyer_tax_id=result.get("buyer_tax_id"),
+            total_amount=result.get("total_amount"),
+            net_amount=result.get("net_amount"),
+            tax_amount=result.get("tax_amount"),
+            currency=result.get("currency"),
+            line_items=result.get("line_items", []),
+            payment_terms=result.get("payment_terms"),
+            payment_method=result.get("payment_method")
+        )
 
 
 class DocumentAILayoutParser:
@@ -79,7 +214,7 @@ class DocumentAILayoutParser:
 
         processor = documentai.Processor(
             display_name=display_name,
-            type_="LAYOUT_PARSER_PROCESSOR",  # This is the type for layout parsing
+            type_="LAYOUT_PARSER_PROCESSOR",
         )
 
         try:
@@ -90,6 +225,53 @@ class DocumentAILayoutParser:
         except Exception as e:
             print(f"Error creating processor: {e}")
             raise
+
+    def check_processor_status(self) -> Dict:
+        """
+        Check if the processor exists and get its details
+
+        Returns:
+            Dictionary with processor information
+        """
+        if not self.processor_id:
+            return {"status": "error", "message": "No processor_id provided"}
+
+        try:
+            name = f"projects/{self.project_id}/locations/{self.location}/processors/{self.processor_id}"
+            processor = self.client.get_processor(name=name)
+
+            return {
+                "status": "success",
+                "processor_name": processor.display_name,
+                "processor_type": processor.type_,
+                "processor_state": processor.state.name
+                if processor.state
+                else "unknown",
+            }
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+    def list_processor_versions(self) -> Dict:
+        """List available processor versions"""
+        if not self.processor_id:
+            return {"status": "error", "message": "No processor_id provided"}
+            
+        try:
+            parent = f"projects/{self.project_id}/locations/{self.location}/processors/{self.processor_id}"
+            request = documentai.ListProcessorVersionsRequest(parent=parent)
+            response = self.client.list_processor_versions(request=request)
+            
+            versions = []
+            for version in response.processor_versions:
+                versions.append({
+                    "name": version.name,
+                    "display_name": version.display_name,
+                    "state": version.state.name if version.state else "unknown"
+                })
+            
+            return {"status": "success", "versions": versions}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
 
     def process_document(
         self, file_path: Union[str, Path], mime_type: Optional[str] = None
@@ -117,23 +299,102 @@ class DocumentAILayoutParser:
         with open(file_path, "rb") as f:
             content = f.read()
 
-        # Prepare the request
+        # Prepare the request - try default version
         name = f"projects/{self.project_id}/locations/{self.location}/processors/{self.processor_id}"
-        if self.processor_version != "rc":
-            name = f"{name}/processorVersions/{self.processor_version}"
+        name = f"{name}/processorVersions/pretrained"
+        print(f"DEBUG: Using processor: {name}")
 
-        document = documentai.Document(content=content, mime_type=mime_type)
-
+        # Simplified request structure
         request = documentai.ProcessRequest(
             name=name,
             raw_document=documentai.RawDocument(content=content, mime_type=mime_type),
         )
 
+        # Check processor status first
+        processor_status = self.check_processor_status()
+        print(f"Processor status: {processor_status}")
+        
+        # List available versions
+        versions = self.list_processor_versions()
+        print(f"Available versions: {versions}")
+
         # Process the document
         print(f"Processing document: {file_path.name}")
-        result = self.client.process_document(request=request)
+        print(f"Using processor: {name}")
+        print(f"File size: {len(content)} bytes")
+        print(f"MIME type: {mime_type}")
 
-        return result.document
+        try:
+            result = self.client.process_document(request=request)
+            print(f"DEBUG: API call successful")
+            print(f"DEBUG: Result type: {type(result)}")
+            print(f"DEBUG: Result attributes: {dir(result)}")
+        except Exception as e:
+            print(f"ERROR: Document AI API call failed: {e}")
+            raise
+
+        # Debug: Print document stats
+        document = result.document
+        print(f"DEBUG: Document type: {type(document)}")
+        print(f"DEBUG: Document attributes: {[attr for attr in dir(document) if not attr.startswith('_')]}")
+        print(f"Document text length: {len(document.text) if document.text else 0}")
+        print(f"Number of pages: {len(document.pages)}")
+        
+        # Check for errors in the document
+        if hasattr(document, 'error') and document.error:
+            print(f"DEBUG: Document processing error: {document.error}")
+        
+        # Check response status
+        if hasattr(result, 'human_review_status'):
+            print(f"DEBUG: Human review status: {result.human_review_status}")
+
+        # Debug: Print raw document structure
+        if hasattr(document, "entities"):
+            print(f"Number of entities: {len(document.entities)}")
+        if hasattr(document, "text_styles"):
+            print(
+                f"Number of text styles: {len(document.text_styles) if document.text_styles else 0}"
+            )
+
+        # Check document_layout field for Layout Parser
+        if hasattr(document, 'document_layout') and document.document_layout:
+            print(f"DEBUG: Found document_layout field!")
+            layout = document.document_layout
+            print(f"DEBUG: Layout type: {type(layout)}")
+            print(f"DEBUG: Layout attributes: {[attr for attr in dir(layout) if not attr.startswith('_')]}")
+            
+            if hasattr(layout, 'blocks'):
+                print(f"DEBUG: Layout blocks: {len(layout.blocks)}")
+                
+        for i, page in enumerate(document.pages):
+            print(
+                f"Page {i+1}: {len(page.paragraphs)} paragraphs, {len(page.tables)} tables"
+            )
+            print(
+                f"Page {i+1} dimension: {page.dimension.width if page.dimension else 'None'} x {page.dimension.height if page.dimension else 'None'}"
+            )
+
+            # Debug: Check if page has any content at all
+            if hasattr(page, "blocks"):
+                print(f"Page {i+1} blocks: {len(page.blocks)}")
+            if hasattr(page, "tokens"):
+                print(f"Page {i+1} tokens: {len(page.tokens)}")
+            if hasattr(page, "lines"):
+                print(f"Page {i+1} lines: {len(page.lines)}")
+
+            # For Layout Parser, try checking visual elements
+            if hasattr(page, "visual_elements"):
+                print(f"Page {i+1} visual_elements: {len(page.visual_elements)}")
+
+        # If document.text is empty but we have pages, try to construct text from page elements
+        if not document.text and document.pages:
+            print(
+                f"DEBUG: document.text is empty, trying alternative extraction methods"
+            )
+            # This might be the issue - Layout Parser might not populate document.text
+            # We need to extract text from page elements directly
+
+        return document
 
     def extract_layout_text(
         self, document: documentai.Document, preserve_layout: bool = True
@@ -148,8 +409,13 @@ class DocumentAILayoutParser:
         Returns:
             Dictionary containing extracted text and metadata
         """
+        print(f"DEBUG: Starting text extraction")
+        print(
+            f"DEBUG: Document.text = '{document.text[:100] if document.text else 'None'}{'...' if document.text and len(document.text) > 100 else ''}'"
+        )
+
         extracted_data = {
-            "full_text": document.text,
+            "full_text": document.text or "",
             "confidence": 0.0,
             "pages": [],
             "blocks": [],
@@ -157,6 +423,50 @@ class DocumentAILayoutParser:
             "layout_preserved_text": "",
         }
 
+        # Handle Layout Parser document_layout structure first
+        if hasattr(document, 'document_layout') and document.document_layout and document.document_layout.blocks:
+            print(f"DEBUG: Using Layout Parser document_layout with {len(document.document_layout.blocks)} blocks")
+            full_text_parts = []
+            
+            for i, block in enumerate(document.document_layout.blocks):
+                print(f"DEBUG: Processing layout block {i+1}")
+                print(f"DEBUG: Block attributes: {[attr for attr in dir(block) if not attr.startswith('_')]}")
+                
+                # Extract text from layout block - Layout Parser might store text differently
+                block_text = self._extract_text_from_layout_block(block)
+                print(f"DEBUG: Block {i+1} text: '{block_text[:50] if block_text else 'Empty'}{'...' if block_text and len(block_text) > 50 else ''}'")
+                
+                if block_text:
+                    full_text_parts.append(block_text)
+                    
+                    # Create block data
+                    block_data = DocumentBlock(
+                        text=block_text,
+                        confidence=getattr(block, 'confidence', 0.0),
+                        page_number=1,  # Layout parser doesn't have page concept
+                        block_type=self._get_layout_block_type(block),
+                        bounding_box=self._get_layout_block_bounding_box(block),
+                    )
+                    extracted_data["blocks"].append(asdict(block_data))
+            
+            # Combine all text
+            if full_text_parts:
+                extracted_data["full_text"] = "\n".join(full_text_parts)
+                print(f"DEBUG: Extracted full text length: {len(extracted_data['full_text'])}")
+                
+                # Calculate average confidence
+                if extracted_data["blocks"]:
+                    extracted_data["confidence"] = sum(
+                        b["confidence"] for b in extracted_data["blocks"]
+                    ) / len(extracted_data["blocks"])
+                
+                # Generate layout-preserved text
+                if preserve_layout:
+                    extracted_data["layout_preserved_text"] = self._preserve_layout_formatting_from_blocks(extracted_data["blocks"])
+                
+                return extracted_data
+            
+        # Fall back to regular page processing if no document_layout
         # Process each page
         for page_num, page in enumerate(document.pages):
             page_data = {
@@ -168,8 +478,15 @@ class DocumentAILayoutParser:
             }
 
             # Extract paragraphs
-            for paragraph in page.paragraphs:
+            print(
+                f"DEBUG: Processing {len(page.paragraphs)} paragraphs on page {page_num + 1}"
+            )
+            for para_idx, paragraph in enumerate(page.paragraphs):
+                print(f"DEBUG: Paragraph {para_idx + 1} layout: {paragraph.layout}")
                 text = self._get_text_from_layout(paragraph.layout, document.text)
+                print(
+                    f"DEBUG: Extracted text from paragraph {para_idx + 1}: '{text[:50] if text else 'Empty'}{'...' if text and len(text) > 50 else ''}'"
+                )
                 if text:
                     block = DocumentBlock(
                         text=text,
@@ -209,12 +526,161 @@ class DocumentAILayoutParser:
     ) -> str:
         """Extract text from a layout element using text segments"""
         text = ""
+        print(
+            f"DEBUG: _get_text_from_layout - layout.text_anchor: {layout.text_anchor}"
+        )
+
         if layout.text_anchor and layout.text_anchor.text_segments:
-            for segment in layout.text_anchor.text_segments:
+            print(f"DEBUG: Found {len(layout.text_anchor.text_segments)} text segments")
+            for i, segment in enumerate(layout.text_anchor.text_segments):
                 start = int(segment.start_index) if segment.start_index else 0
                 end = int(segment.end_index) if segment.end_index else len(full_text)
-                text += full_text[start:end]
-        return text.strip()
+                segment_text = full_text[start:end]
+                print(
+                    f"DEBUG: Segment {i}: [{start}:{end}] = '{segment_text[:30] if segment_text else 'Empty'}{'...' if segment_text and len(segment_text) > 30 else ''}'"
+                )
+                text += segment_text
+        else:
+            print(f"DEBUG: No text_anchor or text_segments found")
+
+        result = text.strip()
+        print(
+            f"DEBUG: Final extracted text: '{result[:30] if result else 'Empty'}{'...' if result and len(result) > 30 else ''}'"
+        )
+        return result
+
+    def _extract_text_from_layout_block(self, block) -> str:
+        """Extract text from a Layout Parser document layout block"""
+        print(f"DEBUG: Layout block type: {type(block)}")
+        
+        # Check what attributes are available
+        if hasattr(block, 'text_block') and block.text_block:
+            print(f"DEBUG: Found text_block")
+            text_block = block.text_block
+            print(f"DEBUG: text_block attributes: {[attr for attr in dir(text_block) if not attr.startswith('_')]}")
+            
+            if hasattr(text_block, 'text'):
+                return text_block.text or ""
+            elif hasattr(text_block, 'blocks'):
+                # Recursive text extraction
+                parts = []
+                for sub_block in text_block.blocks:
+                    sub_text = self._extract_text_from_layout_block(sub_block)
+                    if sub_text:
+                        parts.append(sub_text)
+                return " ".join(parts)
+        
+        # Handle table_block
+        if hasattr(block, 'table_block') and block.table_block:
+            print(f"DEBUG: Found table_block")
+            table_block = block.table_block
+            print(f"DEBUG: table_block attributes: {[attr for attr in dir(table_block) if not attr.startswith('_')]}")
+            
+            return self._extract_text_from_table_block(table_block)
+        
+        # Check for other possible text fields
+        if hasattr(block, 'text') and block.text:
+            return block.text
+            
+        return ""
+
+    def _extract_text_from_table_block(self, table_block) -> str:
+        """Extract text from a table block, formatting as structured table"""
+        parts = []
+        
+        # Check if table_block has header_rows
+        if hasattr(table_block, 'header_rows') and table_block.header_rows:
+            print(f"DEBUG: Processing {len(table_block.header_rows)} header rows")
+            for row_idx, row in enumerate(table_block.header_rows):
+                row_text = self._extract_text_from_table_row(row)
+                if row_text:
+                    parts.append(f"HEADER ROW {row_idx + 1}: {row_text}")
+        
+        # Check if table_block has body_rows
+        if hasattr(table_block, 'body_rows') and table_block.body_rows:
+            print(f"DEBUG: Processing {len(table_block.body_rows)} body rows")
+            for row_idx, row in enumerate(table_block.body_rows):
+                row_text = self._extract_text_from_table_row(row)
+                if row_text:
+                    parts.append(f"ROW {row_idx + 1}: {row_text}")
+        
+        # If no structured rows, try to extract from cells directly
+        if not parts and hasattr(table_block, 'cells') and table_block.cells:
+            print(f"DEBUG: Processing {len(table_block.cells)} table cells directly")
+            cell_texts = []
+            for cell in table_block.cells:
+                cell_text = self._extract_text_from_table_cell(cell)
+                if cell_text:
+                    cell_texts.append(cell_text)
+            if cell_texts:
+                parts.append(" | ".join(cell_texts))
+        
+        return "\n".join(parts) if parts else ""
+
+    def _extract_text_from_table_row(self, row) -> str:
+        """Extract text from a table row"""
+        if hasattr(row, 'cells') and row.cells:
+            cell_texts = []
+            for cell in row.cells:
+                cell_text = self._extract_text_from_table_cell(cell)
+                if cell_text:
+                    cell_texts.append(cell_text)
+            return " | ".join(cell_texts)
+        return ""
+
+    def _extract_text_from_table_cell(self, cell) -> str:
+        """Extract text from a table cell"""
+        # Check if cell has a layout with text
+        if hasattr(cell, 'layout') and cell.layout:
+            if hasattr(cell.layout, 'text_anchor') and cell.layout.text_anchor:
+                # This would need the full document text to resolve
+                return "[CELL_TEXT]"  # Placeholder
+        
+        # Check if cell has direct text
+        if hasattr(cell, 'text') and cell.text:
+            return cell.text
+            
+        # Check if cell has blocks to process recursively
+        if hasattr(cell, 'blocks') and cell.blocks:
+            parts = []
+            for block in cell.blocks:
+                block_text = self._extract_text_from_layout_block(block)
+                if block_text:
+                    parts.append(block_text)
+            return " ".join(parts)
+        
+        return ""
+
+    def _get_layout_block_type(self, block) -> str:
+        """Get the type of a Layout Parser block"""
+        if hasattr(block, 'text_block') and block.text_block:
+            if hasattr(block.text_block, 'type') and block.text_block.type:
+                return str(block.text_block.type)
+            return "text_block"
+        elif hasattr(block, 'table_block') and block.table_block:
+            return "table_block"
+        elif hasattr(block, 'list_block') and block.list_block:
+            return "list_block"
+        return "layout_block"
+
+    def _get_layout_block_bounding_box(self, block) -> Dict:
+        """Get bounding box from Layout Parser block"""
+        if hasattr(block, 'layout') and block.layout:
+            return self._get_bounding_box(block.layout)
+        return {}
+
+    def _preserve_layout_formatting_from_blocks(self, blocks: List[Dict]) -> str:
+        """Create layout-preserved text from blocks"""
+        formatted_text = []
+        formatted_text.append(f"\n{'='*50}")
+        formatted_text.append(f"DOCUMENT LAYOUT")
+        formatted_text.append(f"{'='*50}\n")
+        
+        for block in blocks:
+            formatted_text.append(block["text"])
+            formatted_text.append("")  # Empty line between blocks
+            
+        return "\n".join(formatted_text)
 
     def _get_bounding_box(self, layout: documentai.Document.Page.Layout) -> Dict:
         """Extract bounding box coordinates from layout"""
@@ -301,15 +767,17 @@ class DocumentAILayoutParser:
         }
         return mime_types.get(ext, "application/pdf")
 
-    def process_invoice(self, file_path: Union[str, Path]) -> Dict:
+    def process_invoice(self, file_path: Union[str, Path], use_openai: bool = True, openai_api_key: Optional[str] = None) -> Dict:
         """
         Main method to process an invoice file
 
         Args:
             file_path: Path to the invoice file
+            use_openai: Whether to use OpenAI for structured data extraction
+            openai_api_key: OpenAI API key (optional, will use env var if not provided)
 
         Returns:
-            Dictionary with extracted text and layout information
+            Dictionary with extracted text, layout information, and structured data
         """
         try:
             # Process the document
@@ -321,6 +789,18 @@ class DocumentAILayoutParser:
             # Add metadata
             extracted_data["source_file"] = str(file_path)
             extracted_data["processor_id"] = self.processor_id
+
+            # Use OpenAI to extract structured invoice data
+            if use_openai and extracted_data.get("layout_preserved_text"):
+                print("Extracting structured data using OpenAI...")
+                try:
+                    analyzer = InvoiceAnalyzer(api_key=openai_api_key)
+                    invoice_data = analyzer.extract_invoice_data(extracted_data["layout_preserved_text"])
+                    extracted_data["structured_data"] = asdict(invoice_data)
+                    print("OpenAI extraction completed successfully")
+                except Exception as e:
+                    print(f"Warning: OpenAI extraction failed: {e}")
+                    extracted_data["structured_data"] = None
 
             return extracted_data
 
@@ -342,20 +822,19 @@ def save_results(results: Dict, output_path: Path):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Extract text from invoices using Google Document AI Layout Parser"
+        description="Extract text from invoices using Google Document AI Layout Parser and OpenAI"
     )
     parser.add_argument(
         "input_path", help="Path to invoice file or directory containing invoices"
     )
     parser.add_argument(
         "--project-id",
-        help="Google Cloud Project ID",
-        default="easy-invoice-469917",
+        help="Google Cloud Project ID (required)",
+        required=True,
     )
     parser.add_argument(
         "--processor-id",
         help="Document AI Processor ID (create one if not provided)",
-        default="14e9217d88542adb",
     )
     parser.add_argument(
         "--location", default="eu", choices=["us", "eu"], help="Processor location"
@@ -364,6 +843,15 @@ def main():
         "--output-dir",
         default="invoices/document_ai_llm/results",
         help="Output directory for results",
+    )
+    parser.add_argument(
+        "--openai-api-key",
+        help="OpenAI API key (can also be set via OPENAI_API_KEY environment variable)",
+    )
+    parser.add_argument(
+        "--no-openai",
+        action="store_true",
+        help="Skip OpenAI structured data extraction",
     )
 
     args = parser.parse_args()
@@ -382,7 +870,11 @@ def main():
     if input_path.is_file():
         # Process single file
         print(f"Processing invoice: {input_path}")
-        results = parser.process_invoice(input_path)
+        results = parser.process_invoice(
+            input_path, 
+            use_openai=not args.no_openai,
+            openai_api_key=args.openai_api_key
+        )
 
         output_file = output_dir / f"{input_path.stem}_extracted.json"
         save_results(results, output_file)
@@ -392,6 +884,13 @@ def main():
         with open(text_file, "w", encoding="utf-8") as f:
             f.write(results["layout_preserved_text"])
         print(f"Layout text saved to: {text_file}")
+        
+        # Save structured data separately if available
+        if results.get("structured_data"):
+            structured_file = output_dir / f"{input_path.stem}_structured.json"
+            with open(structured_file, "w", encoding="utf-8") as f:
+                json.dump(results["structured_data"], f, ensure_ascii=False, indent=2)
+            print(f"Structured data saved to: {structured_file}")
 
     elif input_path.is_dir():
         # Process all images in directory
@@ -405,7 +904,11 @@ def main():
         for invoice_file in invoice_files:
             print(f"\nProcessing: {invoice_file.name}")
             try:
-                results = parser.process_invoice(invoice_file)
+                results = parser.process_invoice(
+                    invoice_file,
+                    use_openai=not args.no_openai,
+                    openai_api_key=args.openai_api_key
+                )
 
                 output_file = output_dir / f"{invoice_file.stem}_extracted.json"
                 save_results(results, output_file)
@@ -413,6 +916,12 @@ def main():
                 text_file = output_dir / f"{invoice_file.stem}_layout.txt"
                 with open(text_file, "w", encoding="utf-8") as f:
                     f.write(results["layout_preserved_text"])
+                
+                # Save structured data separately if available
+                if results.get("structured_data"):
+                    structured_file = output_dir / f"{invoice_file.stem}_structured.json"
+                    with open(structured_file, "w", encoding="utf-8") as f:
+                        json.dump(results["structured_data"], f, ensure_ascii=False, indent=2)
 
             except Exception as e:
                 print(f"Error processing {invoice_file.name}: {e}")
